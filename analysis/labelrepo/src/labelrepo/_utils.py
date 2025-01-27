@@ -66,3 +66,4 @@ def process_doc_info(doc_info: dict) -> Tuple[Dict[str, Any], dict]:
             doc_row[field] = None
 
     return doc_row, doc_info
+    

@@ -12,6 +12,8 @@ if __name__ == '__main__':
     )
     parser.add_argument("project_name")
     parser.add_argument("--batch_size", type=int, default=200)
+    parser.add_argument("--pmcids_file", type=str, default=None)
+    parser.add_argument("--prefix", type=str, default=None)
     args = parser.parse_args()
 
-    checkout_docs(args.project_name, args.batch_size)
+    checkout_docs(args.project_name, args.batch_size, args.pmcids_file, args.prefix)

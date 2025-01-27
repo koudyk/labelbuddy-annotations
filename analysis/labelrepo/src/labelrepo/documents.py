@@ -6,7 +6,7 @@ from labelrepo import database
 import hashlib
 
 
-def _load_documents(keep_docs):
+def _load_proj_documents(keep_md5s):
     docs = defaultdict(lambda: defaultdict(dict))
     docs_paths = list(pathlib.Path('projects').glob('*/documents/*.jsonl'))
     for file in docs_paths:
@@ -20,7 +20,7 @@ def _load_documents(keep_docs):
                 elif 'pmid' in doc_info['metadata']:
                     id = f"pmid_{doc_info['metadata']['pmid']}"
 
-                if doc_row['md5'] in keep_docs:
+                if doc_row['md5'] in keep_md5s:
                     docs[id][doc_row['md5']] = doc_info
 
     return docs, docs_paths
@@ -52,7 +52,7 @@ def _project_documents(project_name):
         for doc_info in annotations:
             annotated_docs.add(doc_info["utf8_text_md5_checksum"])
                     
-    docs, docs_paths = _load_documents(annotated_docs)
+    docs, docs_paths = _load_proj_documents(annotated_docs)
 
     # Write out documents in central location
     central_documents = repo.repo_root() / "documents"
@@ -101,7 +101,8 @@ def checkin_docs(project_name=None):
     print("Document centralization complete")
     print(f"{n_new} new, {n_new_hash} new hash, {n_same} documents already exist")
 
-def _load_md5s(project_name):
+
+def _load_md5s(project_name, pmcids):
     """ Loads ids annotated in the project """
     # Get all ids for each project
     connection = database.get_database_connection()
@@ -110,6 +111,10 @@ def _load_md5s(project_name):
                                 detailed_annotation
                                 WHERE project_name = '{project_name}'
                                 """
+
+    if pmcids:
+        q += f"AND pmcid IN ({','.join(pmcids)})"
+
     cur = connection.execute(q)
 
     # Write out pmcids for each project
@@ -128,15 +133,13 @@ def _load_md5s(project_name):
     return md5s
 
 
-def checkout_docs(project_name, batch_size=200):
-    project_dir = pathlib.Path('projects') / project_name
-    all_md5s = _load_md5s(project_name)
-
+def load_central_documents(md5s):
+    """ Loads documents from the central repository """
     doc_path = repo.repo_root() / 'documents'
 
     # Load documents from central repository
     docs = []
-    for id, ann_md5s in all_md5s.items():
+    for id, ann_md5s in md5s.items():
         doc_file = doc_path / f"{id}.jsonl"
         if doc_file.exists():
             with open(doc_file, 'r') as f:
@@ -146,6 +149,21 @@ def checkout_docs(project_name, batch_size=200):
                     if doc_md5 in ann_md5s:
                         docs.append(doc)
 
+    return docs
+
+
+def checkout_docs(project_name, batch_size=200, pmcids_file=None, prefix=None):
+    """ Checkout documents from the central repository into the project """
+    project_dir = pathlib.Path('projects') / project_name
+
+    pmcids = None
+    if pmcids_file:
+        with open(pmcids_file, 'r') as f:
+            pmcids = f.read().splitlines()
+
+    all_md5s = _load_md5s(project_name, pmcids)
+
+    docs = load_central_documents(all_md5s)
 
     # Write the documents to the project directory
     docs_dir = project_dir / 'documents'
@@ -153,7 +171,7 @@ def checkout_docs(project_name, batch_size=200):
 
     for i in range(0, len(docs), batch_size):
         batch = docs[i:i+batch_size]
-        batch_file = docs_dir / f"{i}_{i+batch_size}.jsonl"
+        batch_file = docs_dir / f"{prefix or 'batch'}_{i//batch_size}.jsonl"
         with open(batch_file, 'w') as f:
             for doc in batch:
                 f.write(json.dumps(doc))
